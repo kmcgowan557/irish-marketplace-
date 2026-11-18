@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Irish Marketplace</title>
+  <style>
+    :root{font-family:Arial,sans-serif;color:#18231f;background:#f5f7f5}
+    *{box-sizing:border-box}body{margin:0}header{background:#123d2c;color:white;padding:22px 5%;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+    h1{font-size:25px;margin:0}header p{margin:5px 0 0;color:#d9e8df;font-size:14px}
+    button{border:0;border-radius:9px;padding:11px 15px;background:#176b49;color:white;font-weight:700;cursor:pointer}
+    button.secondary{background:#e6eee9;color:#173b2b}button:disabled{opacity:.5}
+    main{max-width:1100px;margin:26px auto;padding:0 16px}.panel{background:white;border:1px solid #e1e8e3;border-radius:14px;padding:18px;margin-bottom:18px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:150px}
+    input,select,textarea{width:100%;padding:12px;border:1px solid #ccd8d0;border-radius:8px;font:inherit;margin:5px 0 12px;background:white}
+    label{font-size:13px;font-weight:700}h2{font-size:19px;margin:0 0 14px}
+    #status{padding:10px;border-radius:8px;background:#eef5f0;margin:12px 0;font-size:14px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+    .listing{border:1px solid #e2e8e4;border-radius:12px;overflow:hidden;background:white}
+    .listing img{width:100%;height:165px;object-fit:cover;background:#edf1ee}.listing .body{padding:12px}
+    .price{font-weight:800;font-size:20px;color:#145c3c}.muted{color:#64736a;font-size:13px}
+    .hidden{display:none!important}.small{font-size:12px;color:#66736b}
+    footer{text-align:center;color:#65746b;padding:30px 12px;font-size:12px}
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>Irish Marketplace</h1><p>Buy and sell across Ireland</p></div>
+  <div class="row" style="flex:0 1 auto">
+    <button id="loginToggle" class="secondary">Sign in / Register</button>
+    <button id="logout" class="secondary hidden">Sign out</button>
+  </div>
+</header>
+<main>
+  <div id="status">Add your Supabase project details in the configuration section of this file to connect the marketplace.</div>
+
+  <section id="authPanel" class="panel hidden">
+    <h2>Your account</h2>
+    <label>Email address</label><input id="email" type="email" placeholder="you@example.com">
+    <label>Password</label><input id="password" type="password" placeholder="At least 6 characters">
+    <div class="row"><button id="register">Create account</button><button id="signIn" class="secondary">Sign in</button></div>
+    <p class="small">Supabase may send an email to confirm your address before you can sign in.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Find something</h2>
+    <div class="row">
+      <input id="search" placeholder="Search adverts...">
+      <select id="county"><option value="">All counties</option></select>
+      <select id="category"><option value="">All categories</option><option>Electronics</option><option>Home & Garden</option><option>Clothing</option><option>Motors</option><option>Sports & Leisure</option><option>Other</option></select>
+    </div>
+  </section>
+
+  <section id="createPanel" class="panel hidden">
+    <h2>Place an advert</h2>
+    <label>Title</label><input id="title" maxlength="90" placeholder="What are you selling?">
+    <div class="row">
+      <div><label>Price (€)</label><input id="price" type="number" min="0" step="0.01" placeholder="0.00"></div>
+      <div><label>Category</label><select id="newCategory"><option>Electronics</option><option>Home & Garden</option><option>Clothing</option><option>Motors</option><option>Sports & Leisure</option><option>Other</option></select></div>
+      <div><label>County</label><select id="newCounty"></select></div>
+    </div>
+    <label>Description</label><textarea id="description" rows="4" maxlength="2000" placeholder="Describe the item and its condition"></textarea>
+    <label>Photo</label><input id="photo" type="file" accept="image/*">
+    <p class="small">This starter version saves adverts and photos to your Supabase project. The €1 listing fee and €2.50 boost are not charged yet.</p>
+    <button id="publish">Publish advert</button>
+  </section>
+
+  <section class="panel">
+    <div class="row" style="align-items:center"><h2 style="margin:0">Latest adverts</h2><button id="showCreate" class="hidden">+ Place an advert</button></div>
+    <div id="listings" class="grid" style="margin-top:16px"></div>
+  </section>
+</main>
+<footer>Irish Marketplace · Early development version · Payments and delivery are not enabled</footer>
+
+<script type="module">
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+  // Add your own Supabase Project URL and Publishable key here.
+  // Never put a secret/service-role key in website code.
+  const SUPABASE_URL = 'PASTE_YOUR_PROJECT_URL_HERE';
+  const SUPABASE_PUBLISHABLE_KEY = 'PASTE_YOUR_PUBLISHABLE_KEY_HERE';
+
+  const counties = ['Antrim','Armagh','Carlow','Cavan','Clare','Cork','Derry','Donegal','Down','Dublin','Fermanagh','Galway','Kerry','Kildare','Kilkenny','Laois','Leitrim','Limerick','Longford','Louth','Mayo','Meath','Monaghan','Offaly','Roscommon','Sligo','Tipperary','Tyrone','Waterford','Westmeath','Wexford','Wicklow'];
+  const $ = id => document.getElementById(id);
+  const status = msg => $('status').textContent = msg;
+  const configured = SUPABASE_URL.startsWith('https://') && !SUPABASE_URL.includes('PASTE_') && !SUPABASE_PUBLISHABLE_KEY.includes('PASTE_');
+  let supabase = null, currentUser = null, allListings = [];
+  counties.forEach(c => { $('county').add(new Option(c,c)); $('newCounty').add(new Option(c,c)); });
+  if (configured) { supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY); init(); }
+  else status('Website files are ready. Add your Supabase Project URL and Publishable key in this file to connect it.');
+
+  async function init() {
+    const {data:{session}} = await supabase.auth.getSession();
+    currentUser = session?.user || null; updateAccountUI(); await loadListings();
+    supabase.auth.onAuthStateChange((_event,session)=>{currentUser=session?.user||null;updateAccountUI();});
+    status('Connected to Supabase. You can browse adverts and create an account.');
+  }
+  function updateAccountUI(){
+    $('authPanel').classList.toggle('hidden',!!currentUser);
+    $('loginToggle').classList.toggle('hidden',!!currentUser);
+    $('logout').classList.toggle('hidden',!currentUser);
+    $('createPanel').classList.toggle('hidden',!currentUser);
+    $('showCreate').classList.toggle('hidden',!currentUser);
+  }
+  $('loginToggle').onclick=()=>$('authPanel').classList.toggle('hidden');
+  $('showCreate').onclick=()=>$('createPanel').scrollIntoView({behavior:'smooth'});
+  $('register').onclick=async()=>{
+    const {error}=await supabase.auth.signUp({email:$('email').value,password:$('password').value});
+    status(error?error.message:'Account created. Check your email if confirmation is enabled.');
+  };
+  $('signIn').onclick=async()=>{
+    const {error}=await supabase.auth.signInWithPassword({email:$('email').value,password:$('password').value});
+    status(error?error.message:'Signed in successfully.');
+  };
+  $('logout').onclick=async()=>{await supabase.auth.signOut();status('Signed out.');};
+  async function loadListings(){
+    const {data,error}=await supabase.from('listings').select('*').eq('status','active').order('created_at',{ascending:false});
+    if(error){status('Database setup is still needed: '+error.message);return;}
+    allListings=data||[]; renderListings();
+  }
+  function renderListings(){
+    const q=$('search').value.toLowerCase(), county=$('county').value, category=$('category').value;
+    const rows=allListings.filter(x=>(!q||(x.title+' '+(x.description||'')).toLowerCase().includes(q))&&(!county||x.county===county)&&(!category||x.category===category));
+    $('listings').innerHTML=rows.length?rows.map(x=>`<article class="listing">${x.photo_url?`<img src="${escapeAttr(x.photo_url)}" alt="">`:'<div style="height:165px;display:grid;place-items:center;background:#edf1ee;color:#728077">No photo</div>'}<div class="body"><div class="price">€${Number(x.price).toFixed(2)}</div><strong>${escapeHtml(x.title)}</strong><p class="muted">${escapeHtml(x.county)} · ${escapeHtml(x.category)}</p><p>${escapeHtml(x.description||'')}</p></div></article>`).join(''):'<p class="muted">No adverts found yet. Be the first to place one.</p>';
+  }
+  function escapeHtml(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  function escapeAttr(s=''){return escapeHtml(s);}
+  ['search','county','category'].forEach(id=>$(id).addEventListener(id==='search'?'input':'change',renderListings));
+  $('publish').onclick=async()=>{
+    if(!currentUser){status('Please sign in first.');return;}
+    const title=$('title').value.trim(), price=Number($('price').value), description=$('description').value.trim();
+    if(!title||!Number.isFinite(price)||price<0){status('Enter a title and a valid price.');return;}
+    let photo_url=null, file=$('photo').files[0];
+    if(file){
+      if(file.size>5*1024*1024){status('Please choose a photo smaller than 5 MB.');return;}
+      const ext=(file.name.split('.').pop()||'jpg').replace(/[^a-z0-9]/gi,'');
+      const path=`${currentUser.id}/${crypto.randomUUID()}.${ext}`;
+      const {error:uploadError}=await supabase.storage.from('listing-photos').upload(path,file,{upsert:false});
+      if(uploadError){status('Photo upload failed: '+uploadError.message);return;}
+      photo_url=supabase.storage.from('listing-photos').getPublicUrl(path).data.publicUrl;
+    }
+    const {error}=await supabase.from('listings').insert({user_id:currentUser.id,title,price,category:$('newCategory').value,county:$('newCounty').value,description,photo_url});
+    if(error){status('Could not publish: '+error.message);return;}
+    $('title').value='';$('price').value='';$('description').value='';$('photo').value='';
+    status('Your advert has been published.');await loadListings();
+  };
+</script>
+</body>
+</html>
